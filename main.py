@@ -4,10 +4,12 @@ import numpy as np
 import sys
 
 import scipy.interpolate
-from PyQt5 import QtGui
+from PyQt5 import QtGui, QtCore
 from PyQt5.QtWidgets import QWidget, QApplication, QLabel, QVBoxLayout, QHBoxLayout, QPushButton, QCheckBox, QSlider, QGroupBox, QTabWidget, QFileDialog
-from PyQt5.QtGui import QPixmap
+from PyQt5.QtGui import QPixmap, QImage
 from PyQt5.QtCore import pyqtSignal, pyqtSlot, Qt, QThread, QEvent, QPoint
+from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
+from matplotlib.figure import Figure
 
 from LabeledSlider import LabeledSlider
 
@@ -43,6 +45,22 @@ def scipy_bspline(cv, n=100, degree=3, periodic=False):
     spl = scipy.interpolate.BSpline(kv, cv, degree)
     return spl(np.linspace(0,max_param,n))
 
+bins = np.arange(256).reshape(256,1)
+def hist_curve(im):
+    h = np.zeros((300,256,3))
+    if len(im.shape) == 2:
+        color = [(255,255,255)]
+    elif im.shape[2] == 3:
+        color = [ (255,0,0),(0,255,0),(0,0,255) ]
+    for ch, col in enumerate(color):
+        hist_item = cv.calcHist([im],[ch],None,[256],[0,256])
+        cv.normalize(hist_item,hist_item,0,255,cv.NORM_MINMAX)
+        hist=np.int32(np.around(hist_item))
+        pts = np.int32(np.column_stack((bins,hist)))
+        cv.polylines(h,[pts],False,col)
+    y=np.flipud(h)
+    return y
+
 class App(QWidget):
 	points = []
 	dragingPointIndex = -1
@@ -68,6 +86,17 @@ class App(QWidget):
 
 		self.croppedImage = QLabel(self)
 		self.croppedImage.resize(400,300)
+
+		self.inputHistogram = QLabel(self)
+		self.inputHistogram.resize(300,150)
+		self.inputHistogram.move(100,100) # just temporarily move it somewhere
+		self.inputHistogram.show()
+
+		self.outputHistogram = QLabel(self)
+		self.outputHistogram.resize(300, 150)
+		self.outputHistogram.move(100, 100)  # just temporarily move it somewhere
+		self.update_image_qt(np.zeros((150, 300, 3), np.uint8), self.outputHistogram)
+		self.outputHistogram.show()
 
 		self.colourPoints = []
 		# colour list is sRGB!! (in RGB order), vertical columns, then left to right
@@ -237,6 +266,35 @@ class App(QWidget):
 
 		self.updateUI()
 
+		# calculate input histogram
+
+		fig = Figure((3, 1.5))
+		canvas = FigureCanvas(fig)
+		ax = fig.add_subplot(111)
+		fig.subplots_adjust(0,0,1,1)
+		color = ('#1900ff', '#00FB14', '#FB2A1F')
+		maxY = 0
+		for i, col in enumerate(color):
+			histr = cv.calcHist([self.imgOrig], [i], None, [256], [0, 256])
+			maxY = max(maxY, max(histr[1:-1]))
+			ax.plot(histr, color=col)
+		ax.set_xlim([0, 256])
+		ax.set_ylim([0, min(maxY,2e5)])
+		fig.set_facecolor("#000000")
+		ax.axis("off")
+		canvas.draw()
+		width, height = fig.figbbox.width, fig.figbbox.height
+		im = QImage(canvas.buffer_rgba(), width, height, QImage.Format_ARGB32)
+		self.inputHistogram.setPixmap(QPixmap(im))
+
+		# move both histograms in the correct place
+		# self.update_image_qt(hist, self.inputHistogram)
+		self.inputHistogram.move(self.rawImage.pixmap().width() - self.inputHistogram.pixmap().width(), 0)
+		self.update_image_qt(np.zeros((150, 300, 3), np.uint8), self.outputHistogram)
+		self.outputHistogram.move(self.rawImage.pixmap().width() - self.outputHistogram.pixmap().width(), 170)
+
+		self.updateUI() # yes repeated, but we need to update pixmaps to position the histogram correctly
+
 	def saveLUT(self):
 		if self.lutimg is None:
 			return
@@ -256,7 +314,6 @@ class App(QWidget):
 
 
 
-
 	def initaliseColourPoints(self):
 		self.colourPoints.clear()
 		i = 0
@@ -272,6 +329,28 @@ class App(QWidget):
 			self.colourPoints.append((x,y,c))
 			i+=1
 		self.updateUI()
+
+	def renderOutputHistogram(self):
+		if not len(self.img)>1:
+			return
+		fig = Figure((3, 1.5))
+		canvas = FigureCanvas(fig)
+		ax = fig.add_subplot(111)
+		fig.subplots_adjust(0, 0, 1, 1)
+		color = ('#1900ff', '#00FB14', '#FB2A1F')
+		maxY = 0
+		for i, col in enumerate(color):
+			histr = cv.calcHist([self.img], [i], None, [256], [0, 256])
+			maxY = max(maxY, max(histr[1:-1]))
+			ax.plot(histr, color=col)
+		ax.set_xlim([0, 256])
+		ax.set_ylim([0, min(maxY,2e5)])
+		ax.axis("off")
+		fig.set_facecolor("#000000")
+		canvas.draw()
+		width, height = fig.figbbox.width, fig.figbbox.height
+		im = QImage(canvas.buffer_rgba(), width, height, QImage.Format_ARGB32)
+		self.outputHistogram.setPixmap(QPixmap(im))
 
 	def overlayColourPoints(self):
 		for x,y,c in self.colourPoints:
@@ -292,15 +371,22 @@ class App(QWidget):
 			self.update_image_qt(self.img, self.rawImage)
 			self.update_image_qt(self.imgCropped, self.croppedImage)
 			return
-		if self.checkboxShowOutput.isChecked() and len(self.imgOutput)>1:
+
+		if len(self.imgOutput)>1:
 			if self.groupBoxAdjustments.isChecked():
-				for i in range(3): # because cv.add doesn't work properly and only affects the first channel
-					self.img[:,:,i] = cv.add(self.gammaCorrection(self.imgOutput)[:,:,i],self.sliderBrightness.sl.value())
-				self.img[:,:,:] = self.computeToneCurve(self.img[:,:,:])
+				for i in range(3):  # because cv.add doesn't work properly and only affects the first channel
+					self.img[:, :, i] = cv.add(self.gammaCorrection(self.imgOutput)[:, :, i], self.sliderBrightness.sl.value())
+				self.img[:, :, :] = self.computeToneCurve(self.img[:, :, :])
 			else:
 				for i in range(3):  # because cv.add doesn't work properly and only affects the first channel
 					self.img[:, :, i] = cv.add(self.imgOutput[:, :, i], self.sliderBrightness.sl.value())
 				self.img[:, :, :] = self.computeToneCurve(self.img[:, :, :])
+
+			self.renderOutputHistogram()
+
+		# swapped this around so we can use self.img for the histogram rendering
+		if self.checkboxShowOutput.isChecked() and len(self.imgOutput)>1:
+			pass
 		else:
 			self.img[:, :, :] = self.imgOrig[:, :, :]
 

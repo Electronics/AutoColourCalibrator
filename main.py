@@ -11,6 +11,7 @@ from PyQt5.QtCore import pyqtSignal, pyqtSlot, Qt, QThread, QEvent, QPoint
 from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
 from matplotlib.figure import Figure
 
+from CubeFile import CubeFile
 from LabeledSlider import LabeledSlider
 
 
@@ -141,8 +142,11 @@ class App(QWidget):
 		hBoxfile.addWidget(openButton)
 		saveButton = QPushButton("Save LUT")
 		hBoxfile.addWidget(saveButton)
+		saveCubeButton = QPushButton("Save CUBE")
+		hBoxfile.addWidget(saveCubeButton)
 		openButton.clicked.connect(self.openFile)
 		saveButton.clicked.connect(self.saveLUT)
+		saveCubeButton.clicked.connect(self.saveCUBE)
 
 		self.buttonUndo = QPushButton("<-- Undo Point")
 		self.buttonUndo.clicked.connect(lambda:self.undoPoint())
@@ -312,6 +316,12 @@ class App(QWidget):
 		if fname:
 			cv.imwrite(fname,finalLUT)
 
+	def saveCUBE(self):
+		fileTxt = CubeFile("Test", self.coes)
+		fname, _ = QFileDialog.getSaveFileName(self, "Save LUT File", "", "CUBE File (*.cube);;All Files (*)")
+		if fname:
+			with open(fname, "w") as file:
+				file.write(fileTxt)
 
 
 	def initaliseColourPoints(self):
@@ -686,6 +696,7 @@ class App(QWidget):
 		lutimg[np.where(lutimg>255)] = 255
 		lutimg[np.where(lutimg<0)] = 0
 		self.lutimg = cv.cvtColor(lutimg.astype(np.uint8, copy=False), cv.COLOR_RGB2BGR)
+		self.coes = coes
 
 		self.buttonDoCalibration.setStyleSheet("")
 		self.updateUI()

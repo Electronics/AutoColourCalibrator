@@ -1,11 +1,14 @@
 import math
+import os
+
+import cv2
 import cv2 as cv
 import numpy as np
 import sys
 
 import scipy.interpolate
 from PyQt5 import QtGui, QtCore
-from PyQt5.QtWidgets import QWidget, QApplication, QLabel, QVBoxLayout, QHBoxLayout, QPushButton, QCheckBox, QSlider, QGroupBox, QTabWidget, QFileDialog
+from PyQt5.QtWidgets import QWidget, QApplication, QLabel, QVBoxLayout, QHBoxLayout, QPushButton, QCheckBox, QSlider, QGroupBox, QTabWidget, QFileDialog, QMessageBox
 from PyQt5.QtGui import QPixmap, QImage
 from PyQt5.QtCore import pyqtSignal, pyqtSlot, Qt, QThread, QEvent, QPoint
 from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
@@ -317,9 +320,9 @@ class App(QWidget):
 			cv.imwrite(fname,finalLUT)
 
 	def saveCUBE(self):
-		fileTxt = CubeFile("Test", self.coes)
 		fname, _ = QFileDialog.getSaveFileName(self, "Save LUT File", "", "CUBE File (*.cube);;All Files (*)")
 		if fname:
+			fileTxt = CubeFile(os.path.splitext(fname)[0], self.coes)
 			with open(fname, "w") as file:
 				file.write(fileTxt)
 
@@ -550,9 +553,16 @@ class App(QWidget):
 		self.buttonDoCalibration.repaint()
 
 		# make a new LUT image as well
-		lutimg = cv.imread("neutral-lut.png")
-		lutimg = cv.cvtColor(lutimg, cv.COLOR_BGR2RGB)
-		lutimg = lutimg.astype(np.float32, copy=False)
+		try:
+			lutimg = cv.imread("neutral-lut.png")
+			lutimg = cv.cvtColor(lutimg, cv.COLOR_BGR2RGB)
+			lutimg = lutimg.astype(np.float32, copy=False)
+		except cv2.error:
+			dlg = QMessageBox(self)
+			dlg.setWindowTitle("Error")
+			dlg.setText("Missing neutral-lut.png, please add the base file in the same directory as the executable!")
+			dlg.exec()
+			return
 
 		#NB everything we do in this bit is in the RGB colourspac
 		wrong = []
